@@ -1,0 +1,91 @@
+name: healthcare_dw
+version: "1.0.0"
+config-version: 2
+
+profile: healthcare_dw
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths:  ["tests"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+docs-paths:  ["docs"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+# ── Project variables ─────────────────────────────────────────────────────────
+# Override at runtime: dbt run --vars '{"raw_database": "DEV_HEALTHCARE_DW"}'
+vars:
+  # Source layer — always read from the RAW schema in the configured database.
+  # Pointing SNOWFLAKE_DATABASE at a zero-copy clone routes dev runs safely.
+  raw_database: "{{ env_var('SNOWFLAKE_DATABASE', 'HEALTHCARE_DW') }}"
+  raw_schema: RAW
+
+  # Date spine bounds for dim_date; extend when new CMS release years are ingested.
+  dim_date_start: '2019-01-01'
+  dim_date_end:   '2024-12-31'
+
+  # Schema isolation mode for generate_schema_name.sql.
+  # 'database' (default) — fixed schema names, isolation via DB clone.
+  # 'schema'             — target-name-prefixed schemas, shared database.
+  # Set DBT_SCHEMA_ISOLATION in .env to change without touching this file.
+  schema_isolation: "{{ env_var('DBT_SCHEMA_ISOLATION', 'database') }}"
+
+# ── Model configurations ───────────────────────────────────────────────────────
+models:
+  healthcare_dw:
+    # Propagate schema.yml descriptions as Snowflake column and relation comments.
+    +persist_docs:
+      relation: true
+      columns: true
+
+    # ── Staging ───────────────────────────────────────────────────────────────
+    # Views over RAW tables. Rebuilt on every pipeline run, so tagged 'daily'.
+    staging:
+      +materialized: view
+      +schema: staging
+      +tags: ['staging', 'cms', 'daily']
+
+    # ── Intermediate ──────────────────────────────────────────────────────────
+    # Ephemeral CTEs inlined into downstream queries; no Snowflake objects created.
+    intermediate:
+      +materialized: ephemeral
+      +tags: ['intermediate']
+
+    # ── Marts ─────────────────────────────────────────────────────────────────
+    # All mart tables share the base 'marts' and 'cms' tags.
+    # Model-level tags add the refresh cadence:
+    #   'daily'  — rebuilt every pipeline run (source data changes daily)
+    #   'static' — rebuilt only when the model logic or config changes
+    #
+    # Run only daily models:   dbt run --select tag:daily
+    # Run only static models:  dbt run --select tag:static
+    # Run all marts:           dbt run --select tag:marts
+    marts:
+      +materialized: table
+      +schema: marts
+      +tags: ['marts', 'cms']
+
+      # Rebuilt daily: depends on claim volumes that change with each CMS ingest.
+      fct_claims:
+        +tags: ['daily']
+
+      # Rebuilt daily: provider attributes (name, specialty, location) can change
+      # each time a new CMS data year is ingested.
+      dim_providers:
+        +tags: ['daily']
+
+      # Rebuilt daily: procedure descriptions can be revised in new CMS releases.
+      dim_procedures:
+        +tags: ['daily']
+
+      # Static: driven entirely by a deterministic date generator; only changes
+      # when dim_date_start / dim_date_end vars are extended for new CMS years.
+      dim_date:
+        +tags: ['static']
+
+      # Static: Census Bureau region and division mappings are hardcoded and only
+      # change when new territories appear in the provider data.
+      dim_geography:
+        +tags: ['static']

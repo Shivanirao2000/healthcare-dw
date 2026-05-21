@@ -1,0 +1,32 @@
+healthcare_dw:
+  target: dev
+  outputs:
+
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'HEALTHCARE_WH') }}"
+      # Point dev runs at a zero-copy clone by setting SNOWFLAKE_DATABASE=DEV_HEALTHCARE_DW
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'HEALTHCARE_DW') }}"
+      # generate_schema_name.sql ignores this and uses +schema from dbt_project.yml instead.
+      # Set it to your personal schema prefix if you want isolation within the same DB.
+      schema: dev
+      threads: 4
+      client_session_keep_alive: false
+      query_tag: dbt-dev
+
+    prod:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'HEALTHCARE_WH') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'HEALTHCARE_DW') }}"
+      schema: prod
+      threads: 8
+      client_session_keep_alive: false
+      query_tag: dbt-prod

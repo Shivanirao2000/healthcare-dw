@@ -1,0 +1,80 @@
+# ── Secrets & env ─────────────────────────────────────────────────────────────
+.env
+*.pem
+*.key
+*.p12
+credentials.json
+service_account*.json
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.log
+
+# ── dbt ───────────────────────────────────────────────────────────────────────
+dbt_project/target/
+dbt_project/dbt_packages/
+dbt_project/logs/
+# profiles.yml uses only env_var() — no hardcoded credentials — so it IS committed.
+# The .example variant is kept for documentation only.
+
+# ── Great Expectations ────────────────────────────────────────────────────────
+# uncommitted/ holds runtime artifacts: validation results, data docs HTML, and
+# config_variables.yml which may contain secrets. The .gitkeep preserves the
+# directory structure; the contents are never committed.
+great_expectations/uncommitted/**
+!great_expectations/uncommitted/.gitkeep
+great_expectations/.ge_store_backend_id
+
+# ── Airflow ───────────────────────────────────────────────────────────────────
+airflow/logs/**
+!airflow/logs/.gitkeep
+airflow/airflow.db
+airflow.cfg
+airflow.db
+webserver_config.py
+standalone_admin_password.txt
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── IDEs ──────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+
+# ── Snowflake connector ───────────────────────────────────────────────────────
+.snowflake/
+snowflake_ocsp_response_cache.json
+
+# ── Data files (store in S3, not git) ────────────────────────────────────────
+*.csv
+*.parquet
+*.avro
+*.jsonl
+data/

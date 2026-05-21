@@ -1,0 +1,13 @@
+version: 2
+
+# ── Intermediate layer ────────────────────────────────────────────────────────
+# Models here are materialised as EPHEMERAL (inlined into downstream queries).
+# Use this layer for:
+#   - Joins across staging models that are reused by multiple mart models
+#   - Business logic that is too complex for staging but too granular for marts
+#   - Session-window calculations, running totals, or multi-step derivations
+#
+# Naming convention: int_<entity>_<transformation>.sql
+# Examples:
+#   int_claims_with_provider_state.sql  — join stg_claims + stg_providers
+#   int_procedures_categorised.sql      — apply HCPCS category logic before marts

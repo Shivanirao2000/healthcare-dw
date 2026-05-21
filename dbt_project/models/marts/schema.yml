@@ -1,0 +1,457 @@
+version: 2
+
+models:
+
+  # ── dim_providers ────────────────────────────────────────────────────────────
+  - name: dim_providers
+    description: >
+      SCD Type 1 provider dimension. One row per provider NPI, carrying the most
+      recent data year's attributes. Historical provider attributes can be
+      recovered by filtering stg_providers by data_year and re-joining.
+    columns:
+      - name: provider_npi
+        description: Natural key — 10-digit National Provider Identifier.
+        tests:
+          - not_null
+          - unique
+
+      - name: provider_name
+        description: >
+          Display name derived from entity_code: "Surname, First MI" for
+          individuals; legal organisation name for organisations.
+
+      - name: last_org_name
+        description: Last name (individual) or organisation legal name as supplied by CMS.
+
+      - name: first_name
+        description: First name; blank for organisation providers.
+
+      - name: middle_initial
+        description: Middle initial; blank for organisation providers.
+
+      - name: credentials
+        description: Self-reported credentials (e.g. MD, DO, NP, CRNA).
+
+      - name: gender
+        description: "M = Male, F = Female; blank for organisations."
+        tests:
+          - accepted_values:
+              values: ['M', 'F']
+              config:
+                severity: warn
+
+      - name: entity_code
+        description: "I = Individual, O = Organization."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['I', 'O']
+
+      - name: entity_type
+        description: Human-readable entity_code label.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Individual', 'Organization', 'Unknown']
+
+      - name: medicare_participating_ind
+        description: "Y = accepts Medicare assignment, N = does not."
+        tests:
+          - accepted_values:
+              values: ['Y', 'N']
+
+      - name: specialty
+        description: >
+          Provider specialty as self-reported to Medicare. CMS publishes ~90
+          specialty types; the accepted_values list covers the most common ones.
+          severity: warn so that new CMS specialty codes don't break the pipeline.
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - 'Internal Medicine'
+                - 'Family Practice'
+                - 'Cardiology'
+                - 'Orthopaedic Surgery'
+                - 'Dermatology'
+                - 'Ophthalmology'
+                - 'Psychiatry'
+                - 'Gastroenterology'
+                - 'General Surgery'
+                - 'Neurology'
+                - 'Obstetrics & Gynecology'
+                - 'Medical Oncology'
+                - 'Anesthesiology'
+                - 'Emergency Medicine'
+                - 'Diagnostic Radiology'
+                - 'Urology'
+                - 'Pulmonary Disease'
+                - 'Nephrology'
+                - 'Endocrinology'
+                - 'Hematology/Oncology'
+                - 'Physical Medicine and Rehabilitation'
+                - 'Rheumatology'
+                - 'Nurse Practitioner'
+                - 'Physician Assistant'
+                - 'Geriatric Medicine'
+                - 'Infectious Disease'
+                - 'Vascular Surgery'
+                - 'Thoracic Surgery'
+                - 'Plastic and Reconstructive Surgery'
+                - 'Certified Registered Nurse Anesthetist (CRNA)'
+                - 'Neurosurgery'
+                - 'Otolaryngology'
+                - 'Pathology'
+                - 'Allergy/Immunology'
+                - 'Critical Care (Intensivists)'
+              config:
+                severity: warn  # CMS vocabulary is open; new codes are valid
+
+      - name: city
+        description: City of primary practice location.
+
+      - name: state_abbr
+        description: US state or territory 2-letter postal abbreviation.
+
+      - name: state_fips
+        description: 2-digit FIPS code stored as string.
+
+      - name: zip5
+        description: 5-digit ZIP code stored as string.
+
+      - name: country
+        description: Country; blank for US providers.
+
+      - name: ruca_code
+        description: >
+          Rural-Urban Commuting Area code (1.0–10.6).
+          NULL for overseas and US territory providers.
+
+      - name: ruca_description
+        description: Human-readable RUCA classification description.
+
+      - name: urban_rural_classification
+        description: Bucketed RUCA label for BI filters.
+        tests:
+          - accepted_values:
+              values:
+                - 'Metropolitan'
+                - 'Micropolitan'
+                - 'Small Town'
+                - 'Rural'
+                - 'Unknown'
+
+      - name: source_data_year
+        description: CMS release year from which this row's attributes were taken.
+
+      - name: _loaded_at
+        description: Timestamp of the most recent dbt run that refreshed this table.
+
+  # ── dim_procedures ───────────────────────────────────────────────────────────
+  - name: dim_procedures
+    description: >
+      HCPCS procedure code dimension. One row per HCPCS code, carrying the most
+      recent year's description. Covers both Level I (CPT) and Level II codes.
+    columns:
+      - name: hcpcs_code
+        description: 5-character HCPCS procedure code — the natural key.
+        tests:
+          - not_null
+          - unique
+
+      - name: hcpcs_description
+        description: Short CMS-published descriptor for the procedure code.
+
+      - name: drug_indicator
+        description: "Y = drug or biologic claim; N = procedure."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Y', 'N']
+
+      - name: hcpcs_level
+        description: "Level I (CPT) = 5-digit numeric codes; Level II (HCPCS) = letter + 4 digits."
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - 'Level I (CPT)'
+                - 'Level II (HCPCS)'
+
+      - name: hcpcs_category
+        description: Broad category derived from the HCPCS code prefix.
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - 'Transportation & Medical Supplies'
+                - 'Enteral & Parenteral Therapy'
+                - 'Hospital Outpatient PPS'
+                - 'Dental Procedures'
+                - 'Durable Medical Equipment'
+                - 'Professional Services (Temporary)'
+                - 'Behavioral Health & Substance Use'
+                - 'Drugs & Biologics (Injectable)'
+                - 'DME (SADMERC Temporary)'
+                - 'Orthotics & Prosthetics'
+                - 'Medical Services'
+                - 'Pathology & Laboratory'
+                - 'Temporary Codes'
+                - 'Diagnostic Radiology'
+                - 'Temporary National Codes'
+                - 'Medicaid State Codes'
+                - 'Vision, Hearing & Speech'
+                - 'Anesthesia'
+                - 'Surgery'
+                - 'Radiology'
+                - 'Pathology & Lab (CPT)'
+                - 'Evaluation, Management & Other'
+                - 'Other'
+
+      - name: source_data_year
+        description: CMS release year from which this row's description was taken.
+
+      - name: _loaded_at
+        description: Timestamp of the most recent dbt run that refreshed this table.
+
+  # ── dim_geography ────────────────────────────────────────────────────────────
+  - name: dim_geography
+    description: >
+      State-level geography dimension. One row per US state or territory that
+      appears in the provider data. Includes Census Bureau region and division
+      classifications plus a state-level urban/rural indicator derived from the
+      average RUCA code across all providers in that state.
+    columns:
+      - name: state_abbr
+        description: 2-letter postal abbreviation — the natural key.
+        tests:
+          - not_null
+          - unique
+
+      - name: state_name
+        description: Full US Census Bureau state name.
+        tests:
+          - not_null
+
+      - name: census_region
+        description: US Census Bureau region.
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - 'Northeast'
+                - 'Midwest'
+                - 'South'
+                - 'West'
+                - 'Territory / Other'
+
+      - name: census_division
+        description: US Census Bureau division (subdivision of region).
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - 'New England'
+                - 'Middle Atlantic'
+                - 'East North Central'
+                - 'West North Central'
+                - 'South Atlantic'
+                - 'East South Central'
+                - 'West South Central'
+                - 'Mountain'
+                - 'Pacific'
+                - 'Territory / Other'
+
+      - name: urban_rural_classification
+        description: >
+          State-level urban/rural label derived from the average RUCA code of
+          all providers practicing in the state. Individual-provider RUCA is
+          in dim_providers.urban_rural_classification.
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - 'Metropolitan'
+                - 'Micropolitan'
+                - 'Small Town'
+                - 'Rural'
+
+      - name: avg_ruca_code
+        description: Mean RUCA code across all providers in the state; drives urban_rural_classification.
+
+      - name: provider_count
+        description: Number of provider records used to compute avg_ruca_code.
+
+  # ── dim_date ─────────────────────────────────────────────────────────────────
+  - name: dim_date
+    description: >
+      Date spine from 2019-01-01 to 2024-12-31 (controlled by dim_date_start /
+      dim_date_end project vars). Includes calendar and CMS fiscal calendar
+      attributes. Join fct_claims to this model on:
+        dim_date.year = fct_claims.data_year
+      to roll up annual CMS data into broader calendar periods.
+    columns:
+      - name: date_day
+        description: Calendar date — the primary key.
+        tests:
+          - not_null
+          - unique
+
+      - name: year
+        description: Calendar year.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [2019, 2020, 2021, 2022, 2023, 2024]
+
+      - name: quarter_of_year
+        description: Calendar quarter (1–4).
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4]
+
+      - name: quarter_label
+        description: "Formatted quarter label: Q1, Q2, Q3, Q4."
+
+      - name: month_of_year
+        description: Month number (1–12).
+        tests:
+          - not_null
+
+      - name: month_name
+        description: Full month name (January … December).
+
+      - name: month_name_short
+        description: "3-letter abbreviated month name (Jan … Dec)."
+
+      - name: year_month
+        description: "YYYY-MM string for easy grouping (e.g. 2022-03)."
+
+      - name: week_of_year
+        description: ISO week number (1–53).
+
+      - name: day_of_month
+        description: Day of month (1–31).
+
+      - name: day_of_year
+        description: Day of year (1–366).
+
+      - name: day_of_week_iso
+        description: ISO day of week — 1 = Monday, 7 = Sunday.
+
+      - name: day_name
+        description: "3-letter abbreviated day name (Mon, Tue, …, Sun)."
+
+      - name: is_weekend
+        description: "True if Saturday (ISO 6) or Sunday (ISO 7)."
+
+      - name: fiscal_year
+        description: >
+          CMS / HHS fiscal year. Starts October 1 of the prior calendar year.
+          October 2023 through September 2024 = FY 2024.
+        tests:
+          - not_null
+
+      - name: fiscal_quarter
+        description: >
+          Fiscal quarter within the CMS fiscal year.
+          FQ1 = Oct–Dec, FQ2 = Jan–Mar, FQ3 = Apr–Jun, FQ4 = Jul–Sep.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4]
+
+  # ── fct_claims ───────────────────────────────────────────────────────────────
+  - name: fct_claims
+    description: >
+      Central fact table of the star schema. Grain: one row per provider NPI ×
+      HCPCS procedure code × CMS data year. Place-of-service (facility vs.
+      office) is collapsed by aggregating stg_claims, weighting payment averages
+      by service volume. Payment totals are approximations computed from
+      published per-service averages (accurate to ~±5%).
+      Join pattern:
+        fct_claims → dim_providers   on provider_npi
+        fct_claims → dim_procedures  on hcpcs_code
+        fct_claims → dim_geography   on state_abbr
+        fct_claims → dim_date        on dim_date.year = fct_claims.data_year
+    columns:
+      - name: claim_key
+        description: MD5 surrogate key over (provider_npi, hcpcs_code, data_year).
+        tests:
+          - not_null
+          - unique
+
+      - name: provider_npi
+        description: FK → dim_providers.provider_npi.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_providers')
+              field: provider_npi
+              config:
+                severity: warn  # providers absent from dim_providers indicate ingestion gaps
+
+      - name: hcpcs_code
+        description: FK → dim_procedures.hcpcs_code.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_procedures')
+              field: hcpcs_code
+              config:
+                severity: warn
+
+      - name: state_abbr
+        description: FK → dim_geography.state_abbr; derived from the provider's practice state.
+        tests:
+          - relationships:
+              to: ref('dim_geography')
+              field: state_abbr
+              config:
+                severity: warn  # overseas providers have no state
+
+      - name: data_year
+        description: >
+          CMS release year — degenerate dimension.
+          Join to dim_date on: dim_date.year = fct_claims.data_year.
+        tests:
+          - not_null
+
+      - name: total_services
+        description: Total units of service billed across all place-of-service codes.
+        tests:
+          - not_null
+
+      - name: beneficiary_count
+        description: >
+          Distinct Medicare beneficiaries served. Taken as MAX across
+          place-of-service rows to avoid double-counting beneficiaries who
+          received both facility and office services for the same HCPCS.
+        tests:
+          - not_null
+
+      - name: total_beneficiary_day_services
+        description: Sum of beneficiary-day service combinations across all POS codes.
+
+      - name: avg_submitted_charge
+        description: Volume-weighted average charge submitted to Medicare.
+
+      - name: avg_medicare_payment
+        description: Volume-weighted average Medicare payment amount.
+
+      - name: total_submitted_charges
+        description: >
+          Estimated total submitted charges: SUM(avg_submitted_charge × total_services).
+          Approximation — see model description.
+
+      - name: total_medicare_allowed
+        description: Estimated total Medicare allowed amount.
+
+      - name: total_medicare_payment
+        description: Estimated total Medicare payment amount.
+
+      - name: total_medicare_standardized
+        description: >
+          Estimated total Medicare standardised payment (geographic adjustments
+          removed). Use for cross-market volume comparisons.

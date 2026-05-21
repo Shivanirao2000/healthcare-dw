@@ -1,0 +1,10 @@
+version: 2
+
+sources:
+  - name: raw
+    database: HEALTHCARE_DW
+    schema: RAW
+    tables:
+      - name: raw_claims
+      - name: raw_providers
+      - name: raw_procedures

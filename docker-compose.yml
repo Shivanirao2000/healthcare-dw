@@ -1,0 +1,222 @@
+---
+# Healthcare Data Warehouse — Local Airflow Development Stack
+#
+# Services: Postgres (metadata DB) + Airflow init + Webserver + Scheduler
+# Executor: LocalExecutor (no Redis/Celery needed for single-machine dev)
+#
+# ── Quick start ───────────────────────────────────────────────────────────────
+#   cp .env.example .env && $EDITOR .env        # fill in SNOWFLAKE_* vars
+#   echo "AIRFLOW_UID=$(id -u)" >> .env         # fix file-permission warnings
+#   docker-compose build                        # build custom Airflow image
+#   docker-compose up airflow-init              # run one-shot DB setup
+#   docker-compose up -d                        # start webserver + scheduler
+#   open http://localhost:8080                  # admin / admin
+#
+# ── Trigger the pipeline ──────────────────────────────────────────────────────
+#   docker-compose exec airflow-scheduler \
+#     airflow dags trigger healthcare_dw_daily --conf '{"year": 2022}'
+#
+# ── Tear down ─────────────────────────────────────────────────────────────────
+#   docker-compose down          # stop containers, keep volumes
+#   docker-compose down -v       # stop containers AND delete all volumes
+
+version: '3.8'
+
+# ── Shared configuration anchor ───────────────────────────────────────────────
+# All Airflow services (init, webserver, scheduler) inherit from this block.
+# Override individual keys by re-declaring them in the service section.
+x-airflow-common:
+  &airflow-common
+  build:
+    context: .
+    dockerfile: airflow/Dockerfile
+  environment:
+    &airflow-common-env
+
+    # ── Airflow core ──────────────────────────────────────────────────────────
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    # LocalExecutor runs tasks as subprocesses of the scheduler — no worker
+    # containers required. Suitable for single-machine development and CI.
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: UTC
+
+    # ── Metadata database ─────────────────────────────────────────────────────
+    # Airflow stores DAG state, task instances, and XComs in Postgres.
+    # Never use SQLite in multi-process setups — it does not support concurrent writes.
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
+      postgresql+psycopg2://${AIRFLOW_POSTGRES_USER:-airflow}:${AIRFLOW_POSTGRES_PASSWORD}@postgres:5432/${AIRFLOW_POSTGRES_DB:-airflow}
+
+    # ── Security ──────────────────────────────────────────────────────────────
+    # Generate a Fernet key for encrypting connection passwords:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Store it in .env as AIRFLOW__CORE__FERNET_KEY=<output>
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY:-}
+    # Webserver secret key signs session cookies and CSRF tokens.
+    # Change this to a strong random value in production.
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-dev-only-change-in-prod}
+
+    # ── Scheduler tuning ──────────────────────────────────────────────────────
+    # How often the scheduler scans the dags/ directory for new or changed files.
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: '30'
+    # Minimum seconds between DAG run heartbeats.
+    AIRFLOW__SCHEDULER__SCHEDULER_HEARTBEAT_SEC: '5'
+
+    # ── Logging ───────────────────────────────────────────────────────────────
+    AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+    AIRFLOW__LOGGING__FAB_LOGGING_LEVEL: WARNING
+
+    AIRFLOW__SCHEDULER__ZOMBIE_DETECTION_INTERVAL: '600'
+    AIRFLOW__SCHEDULER__TASK_ZOMBIES_KILLED_AFTER: '7200'
+
+    # ── Python path ───────────────────────────────────────────────────────────
+    # Makes the project packages importable inside DAG callables:
+    #   from ingestion.cms_ingest import CMSIngestPipeline
+    PYTHONPATH: /opt/healthcare-dw
+
+    # ── Project root (used by the DAG to resolve script paths) ────────────────
+    HEALTHCARE_DW_ROOT: /opt/healthcare-dw
+
+    # ── dbt ───────────────────────────────────────────────────────────────────
+    DBT_PROFILES_DIR: /opt/healthcare-dw/dbt_project
+    DBT_TARGET: prod
+
+    # ── Great Expectations ────────────────────────────────────────────────────
+    GE_ROOT_DIR: /opt/healthcare-dw/great_expectations
+
+    # ── Snowflake — pulled from .env ──────────────────────────────────────────
+    SNOWFLAKE_ACCOUNT:   ${SNOWFLAKE_ACCOUNT:-}
+    SNOWFLAKE_USER:      ${SNOWFLAKE_USER:-}
+    SNOWFLAKE_PASSWORD:  ${SNOWFLAKE_PASSWORD:-}
+    SNOWFLAKE_DATABASE:  ${SNOWFLAKE_DATABASE:-HEALTHCARE_DW}
+    SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE:-HEALTHCARE_WH}
+    SNOWFLAKE_ROLE:      ${SNOWFLAKE_ROLE:-TRANSFORMER}
+
+  volumes:
+    # DAG files — changes are picked up every DAG_DIR_LIST_INTERVAL seconds
+    # without rebuilding the image.
+    - ./airflow/dags:/opt/airflow/dags
+
+    # Plugins directory — for custom operators, hooks, and macros.
+    - ./airflow/plugins:/opt/airflow/plugins
+
+    # Task logs — stored on a named volume so they persist across container
+    # restarts. Mount as a bind-mount if you want to read them from the host:
+    #   ./airflow/logs:/opt/airflow/logs
+    - airflow-logs:/opt/airflow/logs
+
+    # Full project tree — read-only mount so the scheduler can import
+    # ingestion/*, scripts/*, and great_expectations/* from the DAG callables.
+    - .:/opt/healthcare-dw
+
+  # Run as AIRFLOW_UID to match the owner of DAG files on the host filesystem.
+  # Set AIRFLOW_UID in .env: echo "AIRFLOW_UID=$(id -u)" >> .env
+  user: "${AIRFLOW_UID:-50000}:0"
+
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+  restart: unless-stopped
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Services
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+
+  # ── Postgres — Airflow metadata store ───────────────────────────────────────
+  # Stores DAG definitions, task instance state, XComs, and connection config.
+  # Do not use this Postgres instance for application data (use Snowflake).
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER:     ${AIRFLOW_POSTGRES_USER:-airflow}
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD:?AIRFLOW_POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB:       ${AIRFLOW_POSTGRES_DB:-airflow}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    # Expose on host for direct inspection with psql or DBeaver during debugging.
+    # Remove this in production to reduce the attack surface.
+    ports:
+      - "5433:5432"   # 5433 to avoid conflict if host Postgres is already on 5432
+
+  # ── One-shot initialisation ──────────────────────────────────────────────────
+  # Runs database migrations and creates the admin user, then exits.
+  # The webserver and scheduler wait for this to complete before starting.
+  #
+  # Re-run if you change the Fernet key or need to reset the admin password:
+  #   docker-compose run --rm airflow-init
+  airflow-init:
+    <<: *airflow-common
+    command: >
+      bash -c "
+        echo Running Airflow DB migration &&
+        airflow db migrate &&
+        echo Creating admin user &&
+        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || echo User already exists &&
+        echo Init complete
+      "
+
+    # Override restart so this service only runs once and exits cleanly.
+    restart: on-failure
+    # Run as root during init so it can create directories if needed.
+    user: "0:0"
+
+  # ── Webserver ────────────────────────────────────────────────────────────────
+  # Serves the Airflow UI at http://localhost:8080
+  # Login: AIRFLOW_ADMIN_USER / AIRFLOW_ADMIN_PASSWORD  (set both in .env)
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── Scheduler ────────────────────────────────────────────────────────────────
+  # Parses DAGs, schedules task instances, and executes them as subprocesses
+  # (LocalExecutor). The scheduler and webserver share the same Postgres backend.
+  #
+  # In production, run the scheduler on a separate machine with more CPU, or
+  # switch to CeleryExecutor + dedicated Celery workers for parallelism.
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Named volumes
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  postgres-db:
+    # Survives docker-compose down; deleted with docker-compose down -v
+  airflow-logs:

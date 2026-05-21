@@ -1,0 +1,184 @@
+version: 2
+
+models:
+
+  # ── stg_claims ──────────────────────────────────────────────────────────────
+  - name: stg_claims
+    description: >
+      Renamed and lightly typed view over RAW.RAW_CLAIMS.
+      Grain: one row per provider_npi × hcpcs_code × place_of_service × data_year.
+      Payment columns may be NULL where CMS applied small-cell suppression.
+      No aggregation is applied here — that happens in fct_claims.
+    columns:
+      - name: provider_npi
+        description: Rendering provider National Provider Identifier.
+        tests:
+          - not_null
+
+      - name: hcpcs_code
+        description: 5-character HCPCS procedure code.
+        tests:
+          - not_null
+
+      - name: place_of_service
+        description: "F = Facility (hospital/ASC), O = Office/non-facility."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['F', 'O']
+
+      - name: beneficiary_count
+        description: Distinct Medicare beneficiaries; always >= 11 after CMS suppression.
+        tests:
+          - not_null
+
+      - name: total_services
+        description: Total units of service billed; CMS-rounded, may be fractional.
+        tests:
+          - not_null
+
+      - name: beneficiary_day_services
+        description: Distinct beneficiary × service-date combinations.
+
+      - name: avg_submitted_charge
+        description: Average charge submitted by the provider to Medicare.
+
+      - name: avg_medicare_allowed_amount
+        description: Average Medicare allowed amount (fee schedule / negotiated rate).
+
+      - name: avg_medicare_payment
+        description: Average Medicare payment after beneficiary cost-sharing deductions.
+
+      - name: avg_medicare_standardized_amount
+        description: >
+          Average Medicare payment with geographic wage adjustments removed (GPCI).
+          Use this column for cross-market cost comparisons.
+
+      - name: data_year
+        description: CMS data release year (integer, e.g. 2022).
+        tests:
+          - not_null
+
+      - name: _source_load_date
+        description: Date the ingestion pipeline wrote this row to RAW.RAW_CLAIMS.
+
+      - name: _loaded_at
+        description: Timestamp when this dbt staging view was last materialised.
+
+  # ── stg_providers ────────────────────────────────────────────────────────────
+  - name: stg_providers
+    description: >
+      Renamed view over RAW.RAW_PROVIDERS.
+      Grain: one row per provider_npi × data_year.
+      Each NPI appears once per year even though the source download repeats
+      each NPI for every HCPCS code it billed (deduplication handled by cms_ingest.py).
+    columns:
+      - name: provider_npi
+        description: National Provider Identifier — 10-digit unique CMS-assigned ID.
+        tests:
+          - not_null
+
+      - name: last_org_name
+        description: Last name (individual provider) or full legal organisation name.
+
+      - name: first_name
+        description: First name; blank for organisation-type providers.
+
+      - name: middle_initial
+        description: Middle initial.
+
+      - name: credentials
+        description: Provider credentials as self-reported (e.g. MD, DO, NP, CRNA).
+
+
+      - name: entity_code
+        description: "I = Individual provider, O = Organisation."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['I', 'O']
+
+      - name: address_line_1
+        description: Primary practice street address line 1.
+
+      - name: address_line_2
+        description: Primary practice street address line 2 (suite, floor, etc.).
+
+      - name: city
+        description: City of the primary practice location.
+
+      - name: state_abbr
+        description: US state or territory 2-letter postal abbreviation.
+
+      - name: state_fips
+        description: 2-digit FIPS code; stored as string to preserve leading zeros.
+
+      - name: zip5
+        description: 5-digit ZIP code; string to preserve leading zeros (e.g. 02101).
+
+      - name: ruca_code
+        description: >
+          Rural-Urban Commuting Area code (1.0–10.6).
+          NULL for overseas providers and US territories (no RUCA assignment).
+
+      - name: ruca_description
+        description: Human-readable description of the RUCA classification.
+
+      - name: country
+        description: Country; blank or 2-letter ISO code for non-US providers.
+
+      - name: specialty
+        description: Provider specialty type as self-reported to Medicare (~90 possible values).
+        tests:
+          - not_null
+
+      - name: medicare_participating_ind
+        description: "Y = provider accepts Medicare assignment, N = does not."
+        tests:
+          - accepted_values:
+              values: ['Y', 'N']
+
+      - name: data_year
+        description: CMS data release year.
+        tests:
+          - not_null
+
+      - name: _source_load_date
+        description: Date the ingestion pipeline wrote this row to RAW.RAW_PROVIDERS.
+
+      - name: _loaded_at
+        description: Timestamp when this dbt staging view was last materialised.
+
+  # ── stg_procedures ───────────────────────────────────────────────────────────
+  - name: stg_procedures
+    description: >
+      Renamed view over RAW.RAW_PROCEDURES.
+      Grain: one row per hcpcs_code × data_year.
+    columns:
+      - name: hcpcs_code
+        description: >
+          5-character HCPCS procedure code.
+          Level I (CPT) = 5 digits; Level II = letter + 4 digits.
+        tests:
+          - not_null
+
+      - name: hcpcs_description
+        description: Short CMS-published descriptor for the HCPCS code.
+
+      - name: drug_indicator
+        description: "Y = claim is for a drug or biologic; N = procedure."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Y', 'N']
+
+      - name: data_year
+        description: CMS data release year.
+        tests:
+          - not_null
+
+      - name: _source_load_date
+        description: Date the ingestion pipeline wrote this row to RAW.RAW_PROCEDURES.
+
+      - name: _loaded_at
+        description: Timestamp when this dbt staging view was last materialised.
