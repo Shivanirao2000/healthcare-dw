@@ -385,7 +385,7 @@ healthcare-dw/
 - Power BI account (app.powerbi.com with work/school email)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/healthcare-dw.git
+git clone https://github.com/Shivanirao2000/healthcare-dw.git
 cd healthcare-dw
 pip install -r requirements.txt
 cp .env.example .env        # fill in Snowflake credentials
